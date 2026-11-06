@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { sb, CATS, ICON, norm, shuffle, pct, SEED, type Lesson, type Profile, type Result, type Wrong } from './lib'
+import { TeacherMaterials, StudentMaterials } from './Materials'
 
 const card = 'bg-white rounded-3xl shadow-lg shadow-violet-100 p-5'
 const btn = 'bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded-2xl px-4 py-2 font-semibold disabled:opacity-50'
@@ -33,7 +34,8 @@ export default function App() {
         <b className="text-lg bg-gradient-to-r from-violet-600 to-blue-500 bg-clip-text text-transparent">🌍 Alice’s English World</b>
         <span className="text-sm text-slate-500">{me.name} <button className={btn2 + ' ml-2'} onClick={() => sb.auth.signOut()}>Sign out</button></span>
       </header>
-      {me.role === 'teacher' ? <Teacher /> : <Student me={me} />}
+      {me.role === 'teacher' ? <><Teacher /><TeacherMaterials /></> : <><Student me={me} /><StudentMaterials me={me} /></>}
+
     </div>
   )
 }
