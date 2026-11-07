@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js'
 export const sb = createClient(import.meta.env.VITE_SUPABASE_URL as string, import.meta.env.VITE_SUPABASE_ANON_KEY as string)
 
-export type Ex = { t: 'mc' | 'fill' | 'fix' | 'order' | 'write' | 'speak'; q: string; img?: string; say?: string; o?: string[]; a?: string | number }
+export type Ex = { t: 'mc' | 'fill' | 'fix' | 'order' | 'write' | 'speak' | 'match'; q: string; img?: string; say?: string; o?: string[]; a?: string | number; pairs?: [string, string][] }
 export type Lesson = { id: string; data: { title: string; cat: string; lv: string; x: Ex[] } }
 export type Profile = { id: string; name: string; role: 'teacher' | 'student'; level: string; notes: string }
 export type Wrong = { q: string; y: string; c: string }

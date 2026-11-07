@@ -5,6 +5,8 @@ import { TeacherMaterials, StudentMaterials } from './Materials'
 import { TeacherVoice, StudentVoice } from './Voice'
 import { ReviewBox, FeedbackNote } from './Review'
 import { Login, NewPassword } from './Login'
+import { TeacherGroups } from './Groups'
+import { Rewards, calcStreak, today } from './Rewards'
 
 const card = 'bg-white rounded-3xl shadow-lg shadow-violet-100 p-5'
 const btn = 'bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded-2xl px-4 py-2 font-semibold disabled:opacity-50'
@@ -39,7 +41,7 @@ export default function App() {
         <b className="text-lg bg-gradient-to-r from-violet-600 to-blue-500 bg-clip-text text-transparent">🌍 Alice’s English World</b>
         <span className="text-sm text-slate-500">{me.name} <button className={btn2 + ' ml-2'} onClick={() => sb.auth.signOut()}>Sign out</button></span>
       </header>
-      {me.role === 'teacher' ? <><Teacher /><TeacherMaterials /><TeacherVoice me={me} /></> : <><Student me={me} /><StudentMaterials me={me} /><StudentVoice me={me} /></>}
+      {me.role === 'teacher' ? <><Teacher /><TeacherMaterials /><TeacherGroups /><TeacherVoice me={me} /></> : <><Student me={me} /><StudentMaterials me={me} /><StudentVoice me={me} /></>}
     </div>
   )
 }
@@ -60,7 +62,7 @@ function Teacher() {
     if (l.data && !l.data.length) { await sb.from('lessons').upsert(SEED); return load() }
     setSt((p.data || []) as Profile[]); setLs((l.data || []) as Lesson[]); setAsg(a.data || []); setRs((r.data || []) as Result[])
   }
-  useEffect(() => { load() }, [])
+  useEffect(() => { load(); const h = () => { load() }; window.addEventListener('aew-reload', h); return () => window.removeEventListener('aew-reload', h) }, [])
   const toggle = async (sid: string, lid: string, on: boolean) => {
     if (on) await sb.from('assignments').insert({ student_id: sid, lesson_id: lid })
     else await sb.from('assignments').delete().match({ student_id: sid, lesson_id: lid })
@@ -134,22 +136,26 @@ function Student({ me }: { me: Profile }) {
   const [ls, setLs] = useState<Lesson[]>([])
   const [rs, setRs] = useState<Result[]>([])
   const [play, setPlay] = useState<Lesson | null>(null)
+  const [days, setDays] = useState<string[]>([])
   const load = async () => {
     const a = await sb.from('assignments').select('lesson_id').eq('student_id', me.id)
     const ids = (a.data || []).map((x) => x.lesson_id as string)
     if (ids.length) { const l = await sb.from('lessons').select('*').in('id', ids); setLs((l.data || []) as Lesson[]) }
     const r = await sb.from('results').select('*').eq('student_id', me.id); setRs((r.data || []) as Result[])
+    const ac = await sb.from('activity').select('day').eq('student_id', me.id); setDays((ac.data || []).map((x) => x.day as string))
   }
   useEffect(() => { load() }, [])
-  if (play) return <Player l={play} onClose={() => setPlay(null)} onSave={async (r) => { await sb.from('results').upsert({ student_id: me.id, lesson_id: play.id, ...r }); load() }} />
+  if (play) return <Player l={play} onClose={() => setPlay(null)} onSave={async (r) => { await sb.from('results').upsert({ student_id: me.id, lesson_id: play.id, ...r }); await sb.from('activity').upsert({ student_id: me.id, day: today() }); load() }} />
   const stars = rs.reduce((a, r) => a + r.score, 0)
+  const streak = calcStreak(days)
   const cat: Record<string, number[]> = {}
   rs.forEach((r) => { const l = ls.find((x) => x.id === r.lesson_id); if (l) (cat[l.data.cat] ||= []).push(pct(r)) })
   const wrong = rs.flatMap((r) => (r.wrong || []).map((w: Wrong) => w))
   return (
     <div>
       <div className={card + ' mb-4 flex items-center gap-4 text-white !bg-gradient-to-r from-violet-500 to-blue-500'}>
-        <div className="text-6xl">🦉</div><div><h2 className="text-xl font-bold">Hello, {me.name.split(' ')[0]}! 👋</h2><p className="font-semibold">⭐ {stars} stars</p></div></div>
+        <div className="text-6xl">🦉</div><div><h2 className="text-xl font-bold">Hello, {me.name.split(' ')[0]}! 👋</h2><p className="font-semibold">⭐ {stars} stars{streak > 0 ? ` · 🔥 ${streak}-day streak` : ''}</p></div></div>
+      <Rewards stars={stars} done={rs.length} streak={streak} />
       <div className="grid sm:grid-cols-2 gap-3 mb-4">
         {ls.map((l) => { const r = rs.find((x) => x.lesson_id === l.id); return (
           <div key={l.id} className={card}><div className="text-5xl">{ICON[l.data.cat]}</div><b>{l.data.title}</b>
@@ -173,16 +179,38 @@ function Player({ l, onSave, onClose }: { l: Lesson; onSave: (r: Omit<Result, 's
   const [i, setI] = useState(0)
   const [val, setVal] = useState(x[0].t === 'fix' ? x[0].q : '')
   const [pick, setPick] = useState<number[]>([])
+  const [mp, setMp] = useState<Record<number, number>>({})
+  const [sel, setSel] = useState<number | null>(null)
   const [fb, setFb] = useState<{ ok: boolean | null; c: string } | null>(null)
   const [st, setSt] = useState<{ score: number; total: number; wrong: Wrong[]; answers: Record<string, string> }>({ score: 0, total: 0, wrong: [], answers: {} })
   const e = x[i]
   const words = useMemo(() => (e && e.t === 'order' ? shuffle(String(e.a).replace(/[.!?]$/, '').split(' ')) : []), [i])
+  const rights = useMemo(() => (e && e.t === 'match' ? shuffle((e.pairs || []).map((_, k) => k)) : []), [i])
+  const COLORS = ['border-violet-400 bg-violet-50', 'border-pink-400 bg-pink-50', 'border-sky-400 bg-sky-50', 'border-amber-400 bg-amber-50', 'border-emerald-400 bg-emerald-50', 'border-rose-400 bg-rose-50']
+  const tone = (left: boolean, k: number) => {
+    if (left) return sel === k ? 'border-violet-600 ring-2 ring-violet-300 bg-white' : k in mp ? COLORS[k % 6] : 'border-violet-100 bg-white'
+    const l = Object.keys(mp).find((x) => mp[+x] === k)
+    return l !== undefined ? COLORS[+l % 6] : 'border-violet-100 bg-white'
+  }
+  const pairUp = (rk: number) => {
+    if (sel === null) return
+    const n = { ...mp }
+    Object.keys(n).forEach((key) => { if (n[+key] === rk) delete n[+key] })
+    n[sel] = rk; setMp(n); setSel(null)
+  }
   const say = (t: string) => { try { const u = new SpeechSynthesisUtterance(t); u.lang = 'en-US'; speechSynthesis.cancel(); speechSynthesis.speak(u) } catch { /* no TTS */ } }
   const check = () => {
     let ok: boolean | null = null, u = val, c = ''
     if (e.t === 'mc') { if (val === '') return; u = e.o![+val]; c = e.o![e.a as number]; ok = +val === e.a }
     else if (e.t === 'fill' || e.t === 'fix') { if (!val.trim()) return; c = String(e.a); ok = norm(val) === norm(c) }
     else if (e.t === 'order') { u = pick.map((k) => words[k]).join(' '); if (!u) return; c = String(e.a); ok = norm(u) === norm(c) }
+    else if (e.t === 'match') {
+      const ps = e.pairs || []
+      if (Object.keys(mp).length < ps.length) return
+      ok = ps.every((_, k) => mp[k] === k)
+      u = ps.map((p, k) => p[0] + ' = ' + ps[mp[k]][1]).join('; ')
+      c = ps.map((p) => p[0] + ' = ' + p[1]).join('; ')
+    }
     else { if (!val.trim()) return }
     setSt((s) => ok === null ? { ...s, answers: { ...s.answers, [i]: u } }
       : { ...s, score: s.score + (ok ? 1 : 0), total: s.total + 1, wrong: ok ? s.wrong : [...s.wrong, { q: e.q, y: u, c }] })
@@ -191,7 +219,7 @@ function Player({ l, onSave, onClose }: { l: Lesson; onSave: (r: Omit<Result, 's
   const next = () => {
     const n = i + 1
     if (n >= x.length) onSave(st)
-    setI(n); setFb(null); setPick([]); setVal(x[n]?.t === 'fix' ? x[n].q : '')
+    setI(n); setFb(null); setPick([]); setMp({}); setSel(null); setVal(x[n]?.t === 'fix' ? x[n].q : '')
   }
   if (!e) return (
     <div className={card + ' text-center max-w-md mx-auto'}>
@@ -212,6 +240,15 @@ function Player({ l, onSave, onClose }: { l: Lesson; onSave: (r: Omit<Result, 's
         {e.t === 'order' && <>
           <div className="min-h-[3rem] bg-violet-50 rounded-xl p-2 mb-3 flex flex-wrap gap-2">{pick.map((k) => <button key={k} className={btn2} onClick={() => setPick(pick.filter((p) => p !== k))}>{words[k]}</button>)}</div>
           <div className="flex flex-wrap gap-2">{words.map((w, k) => (pick.includes(k) ? null : <button key={k} className={btn} onClick={() => setPick([...pick, k])}>{w}</button>))}</div></>}
+        {e.t === 'match' && (
+          <div>
+            <p className="text-xs text-slate-500 mb-2">Tap a word on the left, then its pair on the right.</p>
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-2">{(e.pairs || []).map((p, k) => <button key={k} className={'w-full rounded-xl border-2 px-3 py-3 text-lg ' + tone(true, k)} onClick={() => { setSel(k); const n = { ...mp }; delete n[k]; setMp(n) }}>{p[0]}</button>)}</div>
+              <div className="space-y-2">{rights.map((rk) => <button key={rk} className={'w-full rounded-xl border-2 px-3 py-3 text-lg ' + tone(false, rk)} onClick={() => pairUp(rk)}>{(e.pairs || [])[rk][1]}</button>)}</div>
+            </div>
+          </div>
+        )}
         {(e.t === 'write' || e.t === 'speak') && <textarea className={inp} rows={6} value={val} onChange={(ev) => setVal(ev.target.value)} placeholder="Write here..." />}
       </fieldset>
       {fb && <div className={'rounded-xl p-3 mb-3 ' + (fb.ok === null ? 'bg-blue-50 text-blue-700' : fb.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700')}>{fb.ok === null ? 'Saved — Alice will review it.' : fb.ok ? '🌟 Great job!' : '❌ Correct answer: ' + fb.c}</div>}
