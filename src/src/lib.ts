@@ -5,7 +5,7 @@ export type Ex = { t: 'mc' | 'fill' | 'fix' | 'order' | 'write' | 'speak'; q: st
 export type Lesson = { id: string; data: { title: string; cat: string; lv: string; x: Ex[] } }
 export type Profile = { id: string; name: string; role: 'teacher' | 'student'; level: string; notes: string }
 export type Wrong = { q: string; y: string; c: string }
-export type Result = { student_id: string; lesson_id: string; score: number; total: number; wrong: Wrong[]; answers: Record<string, string> }
+export type Result = { student_id: string; lesson_id: string; score: number; total: number; wrong: Wrong[]; answers: Record<string, string>; grade?: string | null; feedback?: string | null }
 
 export const CATS = ['Grammar', 'Vocabulary', 'Listening', 'Writing', 'Speaking', 'Use of English']
 export const ICON: Record<string, string> = { Grammar: '📘', Vocabulary: '🔤', Listening: '🎧', Writing: '✍️', Speaking: '🎤', 'Use of English': '🧩' }

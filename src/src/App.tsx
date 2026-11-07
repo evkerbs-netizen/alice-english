@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { sb, CATS, ICON, norm, shuffle, pct, SEED, type Lesson, type Profile, type Result, type Wrong } from './lib'
 import { TeacherMaterials, StudentMaterials } from './Materials'
+import { TeacherVoice, StudentVoice } from './Voice'
+import { ReviewBox, FeedbackNote } from './Review'
+import { Login, NewPassword } from './Login'
 
 const card = 'bg-white rounded-3xl shadow-lg shadow-violet-100 p-5'
 const btn = 'bg-gradient-to-r from-violet-500 to-blue-500 text-white rounded-2xl px-4 py-2 font-semibold disabled:opacity-50'
@@ -16,9 +19,10 @@ export default function App() {
   const [s, setS] = useState<Session | null>(null)
   const [me, setMe] = useState<Profile | null>(null)
   const [ready, setReady] = useState(false)
+  const [rec, setRec] = useState(false)
   useEffect(() => {
     sb.auth.getSession().then(({ data }) => { setS(data.session); setReady(true) })
-    const { data } = sb.auth.onAuthStateChange((_e, x) => setS(x))
+    const { data } = sb.auth.onAuthStateChange((e, x) => { if (e === 'PASSWORD_RECOVERY') setRec(true); setS(x) })
     return () => data.subscription.unsubscribe()
   }, [])
   useEffect(() => {
@@ -26,6 +30,7 @@ export default function App() {
     sb.from('profiles').select('*').eq('id', s.user.id).single().then(({ data }) => setMe(data as Profile))
   }, [s])
   if (!ready) return null
+  if (rec) return <NewPassword onDone={() => setRec(false)} />
   if (!s) return <Login />
   if (!me) return <p className="p-6">Loading…</p>
   return (
@@ -34,36 +39,7 @@ export default function App() {
         <b className="text-lg bg-gradient-to-r from-violet-600 to-blue-500 bg-clip-text text-transparent">🌍 Alice’s English World</b>
         <span className="text-sm text-slate-500">{me.name} <button className={btn2 + ' ml-2'} onClick={() => sb.auth.signOut()}>Sign out</button></span>
       </header>
-      {me.role === 'teacher' ? <><Teacher /><TeacherMaterials /></> : <><Student me={me} /><StudentMaterials me={me} /></>}
-
-    </div>
-  )
-}
-
-function Login() {
-  const [up, setUp] = useState(false)
-  const [f, setF] = useState({ name: '', email: '', pass: '' })
-  const [msg, setMsg] = useState('')
-  const go = async () => {
-    setMsg('')
-    const r = up
-      ? await sb.auth.signUp({ email: f.email, password: f.pass, options: { data: { name: f.name } } })
-      : await sb.auth.signInWithPassword({ email: f.email, password: f.pass })
-    if (r.error) setMsg(r.error.message)
-    else if (up && !r.data.session) setMsg('Check your email to confirm the account.')
-  }
-  return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className={card + ' w-full max-w-sm text-center'}>
-        <div className="text-6xl">🦉</div>
-        <h1 className="text-2xl font-bold mb-3">Alice’s English World</h1>
-        {up && <input className={inp} placeholder="Your name" value={f.name} onChange={(e) => setF({ ...f, name: e.target.value })} />}
-        <input className={inp} placeholder="Email" type="email" value={f.email} onChange={(e) => setF({ ...f, email: e.target.value })} />
-        <input className={inp} placeholder="Password (6+ characters)" type="password" value={f.pass} onChange={(e) => setF({ ...f, pass: e.target.value })} />
-        <p className="text-rose-500 text-sm mb-2">{msg}</p>
-        <button className={btn + ' w-full'} onClick={go}>{up ? 'Create account' : 'Sign in'}</button>
-        <button className="text-sm text-violet-600 mt-3" onClick={() => setUp(!up)}>{up ? 'I already have an account' : 'New student? Sign up'}</button>
-      </div>
+      {me.role === 'teacher' ? <><Teacher /><TeacherMaterials /><TeacherVoice me={me} /></> : <><Student me={me} /><StudentMaterials me={me} /><StudentVoice me={me} /></>}
     </div>
   )
 }
@@ -136,7 +112,7 @@ function Teacher() {
             {rs.filter((r) => r.student_id === stu.id).map((r) => <div key={r.lesson_id} className="py-2 border-b border-violet-50 text-sm">
               <div className="flex justify-between"><b>{ls.find((l) => l.id === r.lesson_id)?.data.title}</b><b className="text-violet-600">{r.total ? `${r.score}/${r.total}` : 'Needs review'}</b></div>
               {Object.values(r.answers || {}).map((t, i) => <p key={i} className="bg-violet-50 rounded-xl p-2 mt-1">{t}</p>)}
-              {(r.wrong || []).map((w, i) => <p key={i} className="text-rose-500">✗ {w.q} — “{w.y}”</p>)}</div>)}</div>
+              {(r.wrong || []).map((w, i) => <p key={i} className="text-rose-500">✗ {w.q} — “{w.y}”</p>)}<ReviewBox r={r} onSaved={load} /></div>)}</div>
         </div>
       )}
       {tab === 'Lessons' && (
@@ -178,6 +154,7 @@ function Student({ me }: { me: Profile }) {
         {ls.map((l) => { const r = rs.find((x) => x.lesson_id === l.id); return (
           <div key={l.id} className={card}><div className="text-5xl">{ICON[l.data.cat]}</div><b>{l.data.title}</b>
             <p className="text-xs text-slate-500 mb-2">{l.data.cat} · {l.data.lv}</p>
+            {r && <FeedbackNote r={r} />}
             {r && <p className="text-sm text-emerald-600 font-semibold mb-2">Done: {r.total ? `${r.score}/${r.total}` : 'sent to teacher'}</p>}
             <button className={btn} onClick={() => setPlay(l)}>{r ? 'Practice again' : 'Start'}</button></div>) })}
         {!ls.length && <p className="text-slate-500">No lessons assigned yet. Ask Alice!</p>}
